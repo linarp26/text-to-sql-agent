@@ -1,0 +1,561 @@
+# Curated Text-to-SQL benchmark (PostgreSQL 16).
+# Conventions used throughout:
+#   * "revenue" = SUM(order_items.quantity * order_items.unit_price * (1 - order_items.discount))
+#   * Year/quarter filters are on orders.order_date (a TIMESTAMP), half-open ranges.
+#   * Questions state explicitly whether cancelled orders are excluded.
+#   * Numeric outputs that are averages, ratios or money are rounded to 2 decimals.
+#   * ordered: true only when the question asks for a ranking / chronological order.
+
+cases:
+  # ---------------------------------------------------------------- EASY (12)
+  - id: easy_001
+    question: "How many customers are there?"
+    gold_sql: |
+      SELECT COUNT(*) FROM customers;
+    difficulty: easy
+    tags: [count]
+    ordered: false
+
+  - id: easy_002
+    question: "How many orders were placed in 2025, counting orders of every status (including cancelled)?"
+    gold_sql: |
+      SELECT COUNT(*)
+      FROM orders
+      WHERE order_date >= '2025-01-01' AND order_date < '2026-01-01';
+    difficulty: easy
+    tags: [count, filter, date]
+    ordered: false
+
+  - id: easy_003
+    question: "How many products are currently active (not discontinued)?"
+    gold_sql: |
+      SELECT COUNT(*) FROM products WHERE is_active;
+    difficulty: easy
+    tags: [count, filter]
+    ordered: false
+
+  - id: easy_004
+    question: "List each order status and the number of orders with that status."
+    gold_sql: |
+      SELECT status, COUNT(*)
+      FROM orders
+      GROUP BY status;
+    difficulty: easy
+    tags: [count, group]
+    ordered: false
+
+  - id: easy_005
+    question: "List each customer segment and its number of customers."
+    gold_sql: |
+      SELECT segment, COUNT(*)
+      FROM customers
+      GROUP BY segment;
+    difficulty: easy
+    tags: [count, group]
+    ordered: false
+
+  - id: easy_006
+    question: "How many orders have the status 'cancelled'?"
+    gold_sql: |
+      SELECT COUNT(*) FROM orders WHERE status = 'cancelled';
+    difficulty: easy
+    tags: [count, filter]
+    ordered: false
+
+  - id: easy_007
+    question: "What is the average current list price (products.unit_price) across all products, active or not, rounded to 2 decimals?"
+    gold_sql: |
+      SELECT ROUND(AVG(unit_price), 2) FROM products;
+    difficulty: easy
+    tags: [agg]
+    ordered: false
+
+  - id: easy_008
+    question: "How many distinct customer home countries (customers.country) are there?"
+    gold_sql: |
+      SELECT COUNT(DISTINCT country) FROM customers;
+    difficulty: easy
+    tags: [count]
+    ordered: false
+
+  - id: easy_009
+    question: "List the names of all top-level product categories (categories with no parent category)."
+    gold_sql: |
+      SELECT name FROM categories WHERE parent_category_id IS NULL;
+    difficulty: easy
+    tags: [filter, "null"]
+    ordered: false
+
+  - id: easy_010
+    question: "How many product reviews have no comment text (comment is NULL)?"
+    gold_sql: |
+      SELECT COUNT(*) FROM reviews WHERE comment IS NULL;
+    difficulty: easy
+    tags: [count, "null"]
+    ordered: false
+
+  - id: easy_011
+    question: "How many customers signed up (signup_date) in 2024?"
+    gold_sql: |
+      SELECT COUNT(*)
+      FROM customers
+      WHERE signup_date >= '2024-01-01' AND signup_date < '2025-01-01';
+    difficulty: easy
+    tags: [count, filter, date]
+    ordered: false
+
+  - id: easy_012
+    question: "List each payment method and the total amount paid with it across all payments, rounded to 2 decimals."
+    gold_sql: |
+      SELECT method, ROUND(SUM(amount), 2)
+      FROM payments
+      GROUP BY method;
+    difficulty: easy
+    tags: [agg, group]
+    ordered: false
+
+  # -------------------------------------------------------------- MEDIUM (16)
+  - id: medium_001
+    question: "List each sales channel and its number of orders placed in 2024, counting orders of every status."
+    gold_sql: |
+      SELECT channel, COUNT(*)
+      FROM orders
+      WHERE order_date >= '2024-01-01' AND order_date < '2025-01-01'
+      GROUP BY channel;
+    difficulty: medium
+    tags: [count, group, filter, date]
+    ordered: false
+
+  - id: medium_002
+    question: "What was the total revenue in 2025, excluding cancelled orders? Revenue is SUM(quantity * unit_price * (1 - discount)) over order_items. Round to 2 decimals."
+    gold_sql: |
+      SELECT ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2)
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.order_id
+      WHERE o.status <> 'cancelled'
+        AND o.order_date >= '2025-01-01' AND o.order_date < '2026-01-01';
+    difficulty: medium
+    tags: [agg, join, filter, date]
+    ordered: false
+
+  - id: medium_003
+    question: "For each month of 2024, list the month number (1-12) and the total revenue for orders placed that month, excluding cancelled orders, ordered by month. Revenue is SUM(quantity * unit_price * (1 - discount)) over order_items, rounded to 2 decimals."
+    gold_sql: |
+      SELECT EXTRACT(MONTH FROM o.order_date)::int AS month,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.order_id
+      WHERE o.status <> 'cancelled'
+        AND o.order_date >= '2024-01-01' AND o.order_date < '2025-01-01'
+      GROUP BY 1
+      ORDER BY 1;
+    difficulty: medium
+    tags: [agg, join, group, date, order]
+    ordered: true
+
+  - id: medium_004
+    question: "Who are the top 5 customers by total revenue across all time, excluding cancelled orders? List customer_id, first name, last name and revenue (SUM(quantity * unit_price * (1 - discount)) over order_items, rounded to 2 decimals), highest revenue first, breaking ties by lower customer_id."
+    gold_sql: |
+      SELECT c.customer_id, c.first_name, c.last_name,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS revenue
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.customer_id
+      JOIN order_items oi ON oi.order_id = o.order_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY c.customer_id, c.first_name, c.last_name
+      ORDER BY SUM(oi.quantity * oi.unit_price * (1 - oi.discount)) DESC, c.customer_id
+      LIMIT 5;
+    difficulty: medium
+    tags: [agg, join, group, order]
+    ordered: true
+
+  - id: medium_005
+    question: "List each customer home country that has more than 20 customers, together with its number of customers."
+    gold_sql: |
+      SELECT country, COUNT(*)
+      FROM customers
+      GROUP BY country
+      HAVING COUNT(*) > 20;
+    difficulty: medium
+    tags: [count, group, having]
+    ordered: false
+
+  - id: medium_006
+    question: "For each product category that has at least one review on its products, list the category name and the average review rating, rounded to 2 decimals."
+    gold_sql: |
+      SELECT c.name, ROUND(AVG(r.rating), 2)
+      FROM reviews r
+      JOIN products p ON p.product_id = r.product_id
+      JOIN categories c ON c.category_id = p.category_id
+      GROUP BY c.name;
+    difficulty: medium
+    tags: [agg, join, group]
+    ordered: false
+
+  - id: medium_007
+    question: "What was the average order value in 2025, excluding cancelled orders? Order value is the order's SUM(quantity * unit_price * (1 - discount)) over its order_items; average over orders that have at least one item, rounded to 2 decimals."
+    gold_sql: |
+      WITH order_values AS (
+          SELECT o.order_id,
+                 SUM(oi.quantity * oi.unit_price * (1 - oi.discount)) AS order_value
+          FROM orders o
+          JOIN order_items oi ON oi.order_id = o.order_id
+          WHERE o.status <> 'cancelled'
+            AND o.order_date >= '2025-01-01' AND o.order_date < '2026-01-01'
+          GROUP BY o.order_id
+      )
+      SELECT ROUND(AVG(order_value), 2) FROM order_values;
+    difficulty: medium
+    tags: [agg, join, cte, subquery, date]
+    ordered: false
+
+  - id: medium_008
+    question: "List each shipping carrier that has at least one shipment still in transit (delivered_at is NULL), with its number of in-transit shipments."
+    gold_sql: |
+      SELECT carrier, COUNT(*)
+      FROM shipments
+      WHERE delivered_at IS NULL
+      GROUP BY carrier;
+    difficulty: medium
+    tags: [count, group, "null", filter]
+    ordered: false
+
+  - id: medium_009
+    question: "How many products (active or not) have never appeared in any order item?"
+    gold_sql: |
+      SELECT COUNT(*)
+      FROM products p
+      WHERE NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.product_id = p.product_id);
+    difficulty: medium
+    tags: [count, subquery]
+    ordered: false
+
+  - id: medium_010
+    question: "How many customers have never placed any order (of any status)?"
+    gold_sql: |
+      SELECT COUNT(*)
+      FROM customers c
+      WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.customer_id);
+    difficulty: medium
+    tags: [count, subquery]
+    ordered: false
+
+  - id: medium_011
+    question: "For each sales channel, what percentage of all its orders (all statuses, all time) have status 'returned'? List the channel and the percentage (0-100 scale), rounded to 2 decimals."
+    gold_sql: |
+      SELECT channel,
+             ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'returned') / COUNT(*), 2)
+      FROM orders
+      GROUP BY channel;
+    difficulty: medium
+    tags: [agg, group, filter]
+    ordered: false
+
+  - id: medium_012
+    question: "What was the total gross profit in 2025, excluding cancelled orders? Gross profit per line is quantity * (order_items.unit_price * (1 - discount) - products.unit_cost). Round to 2 decimals."
+    gold_sql: |
+      SELECT ROUND(SUM(oi.quantity * (oi.unit_price * (1 - oi.discount) - p.unit_cost)), 2)
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.order_id
+      JOIN products p ON p.product_id = oi.product_id
+      WHERE o.status <> 'cancelled'
+        AND o.order_date >= '2025-01-01' AND o.order_date < '2026-01-01';
+    difficulty: medium
+    tags: [agg, join, filter, date]
+    ordered: false
+
+  - id: medium_013
+    question: "Which 3 product categories (the category directly assigned to products) sold the most units (sum of order_items.quantity) in 2024, excluding cancelled orders? List category name and units sold, highest first, breaking ties by category name alphabetically."
+    gold_sql: |
+      SELECT c.name, SUM(oi.quantity) AS units
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.order_id
+      JOIN products p ON p.product_id = oi.product_id
+      JOIN categories c ON c.category_id = p.category_id
+      WHERE o.status <> 'cancelled'
+        AND o.order_date >= '2024-01-01' AND o.order_date < '2025-01-01'
+      GROUP BY c.name
+      ORDER BY units DESC, c.name
+      LIMIT 3;
+    difficulty: medium
+    tags: [agg, join, group, date, order]
+    ordered: true
+
+  - id: medium_014
+    question: "How many distinct customers placed at least one non-cancelled order in Q3 2024 (July 1 through September 30, 2024)?"
+    gold_sql: |
+      SELECT COUNT(DISTINCT customer_id)
+      FROM orders
+      WHERE status <> 'cancelled'
+        AND order_date >= '2024-07-01' AND order_date < '2024-10-01';
+    difficulty: medium
+    tags: [count, filter, date]
+    ordered: false
+
+  - id: medium_015
+    question: "For payments made (paid_at) in 2025, list each payment method, its number of payments, and its total amount rounded to 2 decimals."
+    gold_sql: |
+      SELECT method, COUNT(*), ROUND(SUM(amount), 2)
+      FROM payments
+      WHERE paid_at >= '2025-01-01' AND paid_at < '2026-01-01'
+      GROUP BY method;
+    difficulty: medium
+    tags: [count, agg, group, filter, date]
+    ordered: false
+
+  - id: medium_016
+    question: "What was the average number of units per order (sum of order_items.quantity per order) for orders placed in 2024, excluding cancelled orders and considering only orders that have at least one item? Round to 2 decimals."
+    gold_sql: |
+      WITH per_order AS (
+          SELECT o.order_id, SUM(oi.quantity) AS units
+          FROM orders o
+          JOIN order_items oi ON oi.order_id = o.order_id
+          WHERE o.status <> 'cancelled'
+            AND o.order_date >= '2024-01-01' AND o.order_date < '2025-01-01'
+          GROUP BY o.order_id
+      )
+      SELECT ROUND(AVG(units), 2) FROM per_order;
+    difficulty: medium
+    tags: [agg, join, cte, subquery, date]
+    ordered: false
+
+  # ---------------------------------------------------------------- HARD (12)
+  - id: hard_001
+    question: "List each top-level category (a category with no parent) and the total revenue of all products in it or any of its descendant subcategories, across all time, excluding cancelled orders. Revenue is SUM(quantity * unit_price * (1 - discount)) over order_items, rounded to 2 decimals. Only include top-level categories with revenue."
+    gold_sql: |
+      WITH RECURSIVE tree AS (
+          SELECT category_id, category_id AS root_id
+          FROM categories
+          WHERE parent_category_id IS NULL
+          UNION ALL
+          SELECT c.category_id, t.root_id
+          FROM categories c
+          JOIN tree t ON c.parent_category_id = t.category_id
+      )
+      SELECT root.name,
+             ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2)
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.order_id
+      JOIN products p ON p.product_id = oi.product_id
+      JOIN tree t ON t.category_id = p.category_id
+      JOIN categories root ON root.category_id = t.root_id
+      WHERE o.status <> 'cancelled'
+      GROUP BY root.name;
+    difficulty: hard
+    tags: [cte, self_join, join, agg, group]
+    ordered: false
+
+  - id: hard_002
+    question: "For each product category that had sales in 2025, find the single product with the highest 2025 revenue in that category (excluding cancelled orders; ties broken by lowest product_id). List the category name, the product name, and its revenue (SUM(quantity * unit_price * (1 - discount)) over order_items) rounded to 2 decimals."
+    gold_sql: |
+      WITH product_rev AS (
+          SELECT p.category_id, p.product_id, p.name,
+                 SUM(oi.quantity * oi.unit_price * (1 - oi.discount)) AS revenue
+          FROM orders o
+          JOIN order_items oi ON oi.order_id = o.order_id
+          JOIN products p ON p.product_id = oi.product_id
+          WHERE o.status <> 'cancelled'
+            AND o.order_date >= '2025-01-01' AND o.order_date < '2026-01-01'
+          GROUP BY p.category_id, p.product_id, p.name
+      ),
+      ranked AS (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY category_id
+                                       ORDER BY revenue DESC, product_id) AS rn
+          FROM product_rev
+      )
+      SELECT c.name, r.name, ROUND(r.revenue, 2)
+      FROM ranked r
+      JOIN categories c ON c.category_id = r.category_id
+      WHERE r.rn = 1;
+    difficulty: hard
+    tags: [window, cte, join, agg, group, date]
+    ordered: false
+
+  - id: hard_003
+    question: "For each month of 2025, list the month number (1-12), that month's revenue, and the running (cumulative year-to-date) revenue through that month, ordered by month. Exclude cancelled orders; revenue is SUM(quantity * unit_price * (1 - discount)) over order_items. Round both amounts to 2 decimals (compute the running total from unrounded monthly values)."
+    gold_sql: |
+      WITH monthly AS (
+          SELECT EXTRACT(MONTH FROM o.order_date)::int AS month,
+                 SUM(oi.quantity * oi.unit_price * (1 - oi.discount)) AS revenue
+          FROM orders o
+          JOIN order_items oi ON oi.order_id = o.order_id
+          WHERE o.status <> 'cancelled'
+            AND o.order_date >= '2025-01-01' AND o.order_date < '2026-01-01'
+          GROUP BY 1
+      )
+      SELECT month,
+             ROUND(revenue, 2),
+             ROUND(SUM(revenue) OVER (ORDER BY month), 2)
+      FROM monthly
+      ORDER BY month;
+    difficulty: hard
+    tags: [window, cte, join, agg, date, order]
+    ordered: true
+
+  - id: hard_004
+    question: "For each month of 2024, list the month number (1-12), that month's revenue rounded to 2 decimals, and the month-over-month revenue growth as a percentage of the previous 2024 month's revenue (100 * (this - previous) / previous) rounded to 2 decimals; January's growth should be NULL. Exclude cancelled orders; revenue is SUM(quantity * unit_price * (1 - discount)) over order_items. Order by month."
+    gold_sql: |
+      WITH monthly AS (
+          SELECT EXTRACT(MONTH FROM o.order_date)::int AS month,
+                 SUM(oi.quantity * oi.unit_price * (1 - oi.discount)) AS revenue
+          FROM orders o
+          JOIN order_items oi ON oi.order_id = o.order_id
+          WHERE o.status <> 'cancelled'
+            AND o.order_date >= '2024-01-01' AND o.order_date < '2025-01-01'
+          GROUP BY 1
+      )
+      SELECT month,
+             ROUND(revenue, 2),
+             ROUND(100.0 * (revenue - LAG(revenue) OVER (ORDER BY month))
+                   / LAG(revenue) OVER (ORDER BY month), 2)
+      FROM monthly
+      ORDER BY month;
+    difficulty: hard
+    tags: [window, cte, join, agg, date, order]
+    ordered: true
+
+  - id: hard_005
+    question: "What is the repeat purchase rate: among customers with at least one non-cancelled order (all time), the percentage (0-100 scale) who have two or more non-cancelled orders? Round to 2 decimals."
+    gold_sql: |
+      WITH per_customer AS (
+          SELECT customer_id, COUNT(*) AS n_orders
+          FROM orders
+          WHERE status <> 'cancelled'
+          GROUP BY customer_id
+      )
+      SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE n_orders >= 2) / COUNT(*), 2)
+      FROM per_customer;
+    difficulty: hard
+    tags: [cte, agg, filter, group]
+    ordered: false
+
+  - id: hard_006
+    question: "Consider customers whose first non-cancelled order (earliest order_date) was placed in 2024. Return three values: the number of such customers, how many of them placed another non-cancelled order strictly after their first order's timestamp and no more than 90 days after it (order_date <= first order_date + 90 days), and that retained count as a percentage (0-100 scale) of the cohort, rounded to 2 decimals."
+    gold_sql: |
+      WITH firsts AS (
+          SELECT customer_id, MIN(order_date) AS first_at
+          FROM orders
+          WHERE status <> 'cancelled'
+          GROUP BY customer_id
+      ),
+      cohort AS (
+          SELECT customer_id, first_at
+          FROM firsts
+          WHERE first_at >= '2024-01-01' AND first_at < '2025-01-01'
+      ),
+      retained AS (
+          SELECT DISTINCT c.customer_id
+          FROM cohort c
+          JOIN orders o
+            ON o.customer_id = c.customer_id
+           AND o.status <> 'cancelled'
+           AND o.order_date > c.first_at
+           AND o.order_date <= c.first_at + INTERVAL '90 days'
+      )
+      SELECT (SELECT COUNT(*) FROM cohort),
+             (SELECT COUNT(*) FROM retained),
+             ROUND(100.0 * (SELECT COUNT(*) FROM retained) / (SELECT COUNT(*) FROM cohort), 2);
+    difficulty: hard
+    tags: [cte, subquery, join, date, agg]
+    ordered: false
+
+  - id: hard_007
+    question: "For each shipping carrier, what is the average delivery time in days for delivered shipments (delivered_at not NULL), measured as fractional days between shipped_at and delivered_at (e.g. 36 hours = 1.5 days)? List carrier and average days rounded to 2 decimals."
+    gold_sql: |
+      SELECT carrier,
+             ROUND((AVG(EXTRACT(EPOCH FROM (delivered_at - shipped_at))) / 86400)::numeric, 2)
+      FROM shipments
+      WHERE delivered_at IS NOT NULL
+      GROUP BY carrier;
+    difficulty: hard
+    tags: [agg, group, date, "null"]
+    ordered: false
+
+  - id: hard_008
+    question: "For each top-level category (a category with no parent), count the products (active or not) in it or any of its descendant subcategories that have received fewer than 15 reviews (including products with no reviews). List the top-level category name and that count, only for top-level categories with at least one such product."
+    gold_sql: |
+      WITH RECURSIVE tree AS (
+          SELECT category_id, category_id AS root_id
+          FROM categories
+          WHERE parent_category_id IS NULL
+          UNION ALL
+          SELECT c.category_id, t.root_id
+          FROM categories c
+          JOIN tree t ON c.parent_category_id = t.category_id
+      )
+      SELECT root.name, COUNT(*)
+      FROM products p
+      JOIN tree t ON t.category_id = p.category_id
+      JOIN categories root ON root.category_id = t.root_id
+      WHERE (SELECT COUNT(*) FROM reviews r WHERE r.product_id = p.product_id) < 15
+      GROUP BY root.name;
+    difficulty: hard
+    tags: [cte, self_join, subquery, join, count, group]
+    ordered: false
+
+  - id: hard_009
+    question: "For each customer signup year (year of signup_date), list the year, the number of customers who signed up that year, and how many of those customers have placed at least one non-cancelled order."
+    gold_sql: |
+      SELECT EXTRACT(YEAR FROM c.signup_date)::int AS signup_year,
+             COUNT(*) AS customers,
+             COUNT(b.customer_id) AS buyers
+      FROM customers c
+      LEFT JOIN (
+          SELECT DISTINCT customer_id
+          FROM orders
+          WHERE status <> 'cancelled'
+      ) b ON b.customer_id = c.customer_id
+      GROUP BY 1;
+    difficulty: hard
+    tags: [subquery, join, group, count, date]
+    ordered: false
+
+  - id: hard_010
+    question: "How many customers had higher revenue in 2025 than in 2024, excluding cancelled orders? Revenue is SUM(quantity * unit_price * (1 - discount)) over order_items; consider customers with at least one non-cancelled order in 2024 or 2025, and treat a year with no revenue as 0."
+    gold_sql: |
+      WITH yearly AS (
+          SELECT o.customer_id,
+                 COALESCE(SUM(oi.quantity * oi.unit_price * (1 - oi.discount))
+                          FILTER (WHERE o.order_date >= '2024-01-01' AND o.order_date < '2025-01-01'), 0) AS rev_2024,
+                 COALESCE(SUM(oi.quantity * oi.unit_price * (1 - oi.discount))
+                          FILTER (WHERE o.order_date >= '2025-01-01' AND o.order_date < '2026-01-01'), 0) AS rev_2025
+          FROM orders o
+          JOIN order_items oi ON oi.order_id = o.order_id
+          WHERE o.status <> 'cancelled'
+            AND o.order_date >= '2024-01-01' AND o.order_date < '2026-01-01'
+          GROUP BY o.customer_id
+      )
+      SELECT COUNT(*) FROM yearly WHERE rev_2025 > rev_2024;
+    difficulty: hard
+    tags: [cte, agg, join, filter, date, count]
+    ordered: false
+
+  - id: hard_011
+    question: "For 2025, excluding cancelled orders, list each sales channel and its share of total 2025 revenue as a percentage (0-100 scale) rounded to 2 decimals. Revenue is SUM(quantity * unit_price * (1 - discount)) over order_items."
+    gold_sql: |
+      SELECT o.channel,
+             ROUND(100.0 * SUM(oi.quantity * oi.unit_price * (1 - oi.discount))
+                   / SUM(SUM(oi.quantity * oi.unit_price * (1 - oi.discount))) OVER (), 2)
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.order_id
+      WHERE o.status <> 'cancelled'
+        AND o.order_date >= '2025-01-01' AND o.order_date < '2026-01-01'
+      GROUP BY o.channel;
+    difficulty: hard
+    tags: [window, join, agg, group, date]
+    ordered: false
+
+  - id: hard_012
+    question: "Across all customers, what is the average gap in days between a customer's consecutive non-cancelled orders (each order compared with the same customer's previous non-cancelled order by order_date), measured in fractional days from the timestamps? Customers' first orders have no gap and are ignored. Round to 2 decimals."
+    gold_sql: |
+      WITH gaps AS (
+          SELECT order_date - LAG(order_date) OVER (PARTITION BY customer_id ORDER BY order_date) AS gap
+          FROM orders
+          WHERE status <> 'cancelled'
+      )
+      SELECT ROUND((AVG(EXTRACT(EPOCH FROM gap)) / 86400)::numeric, 2)
+      FROM gaps
+      WHERE gap IS NOT NULL;
+    difficulty: hard
+    tags: [window, cte, date, agg]
+    ordered: false

@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text-to-SQL Analytics Agent</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>
+<style>
+:root {
+  --bg: #f5f7fb; --surface: #ffffff; --surface-2: #f0f3f8; --border: #dfe4ec;
+  --text: #1a2233; --muted: #667085; --accent: #4f46e5; --accent-hover: #4338ca; --accent-soft: #eef0ff;
+  --ok: #15803d; --ok-soft: #dcfce7; --err: #b91c1c; --err-soft: #fee2e2; --warn: #b45309; --warn-soft: #fef3c7;
+  --code-bg: #f6f8fa; --shadow: 0 1px 3px rgba(16,24,40,.06), 0 1px 2px rgba(16,24,40,.04);
+  --kw: #7c3aed; --str: #0f766e; --num: #b45309; --cmt: #8a94a6; --fn: #2563eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface-2: #1c232d; --border: #2b3340;
+    --text: #e6edf3; --muted: #8b949e; --accent: #818cf8; --accent-hover: #a5b4fc; --accent-soft: #1e2140;
+    --ok: #4ade80; --ok-soft: #12301f; --err: #f87171; --err-soft: #3a1717; --warn: #fbbf24; --warn-soft: #3a2a0c;
+    --code-bg: #0b0f14; --shadow: 0 1px 3px rgba(0,0,0,.4);
+    --kw: #c4b5fd; --str: #5eead4; --num: #fcd34d; --cmt: #6b7280; --fn: #93c5fd;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button { font: inherit; cursor: pointer; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px;
+  background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
+header h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 10px; }
+.logo { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+.btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px; padding: 6px 12px; }
+.btn:hover { background: var(--surface-2); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; padding: 9px 20px; font-weight: 600; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:disabled { opacity: .6; cursor: wait; }
+.btn-sm { padding: 3px 10px; font-size: 12px; }
+.layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 20px; max-width: 1400px; margin: 0 auto; padding: 20px; }
+.layout.with-schema { grid-template-columns: 240px minmax(0, 1fr) 300px; }
+aside.panel, .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+aside.panel { padding: 14px; align-self: start; position: sticky; top: 76px; max-height: calc(100vh - 96px); overflow: auto; }
+aside h2, .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; }
+#schemaPanel { display: none; }
+.with-schema #schemaPanel { display: block; }
+.history-item { display: block; width: 100%; text-align: left; border: 0; background: none; color: var(--text); padding: 8px 10px; border-radius: 8px; margin-bottom: 2px; }
+.history-item:hover { background: var(--surface-2); }
+.history-item.active { background: var(--accent-soft); }
+.history-item .q { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.history-item .meta { font-size: 11px; color: var(--muted); }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.dot.ok { background: var(--ok); } .dot.err { background: var(--err); }
+.empty { color: var(--muted); font-size: 13px; }
+main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card { padding: 16px 18px; }
+textarea { width: 100%; min-height: 84px; resize: vertical; border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 15px; }
+textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.ask-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.hint { color: var(--muted); font-size: 12px; }
+kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 11px; background: var(--surface-2); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 5px 12px; font-size: 13px; text-align: left; }
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.loading { display: flex; align-items: center; gap: 12px; color: var(--muted); }
+.spinner { width: 22px; height: 22px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.summary { font-size: 15px; border-left: 4px solid var(--accent); }
+.summary p { margin: 0; white-space: pre-wrap; }
+.meta-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 10px; background: var(--surface-2); color: var(--muted); }
+.badge.ok { background: var(--ok-soft); color: var(--ok); }
+.badge.err { background: var(--err-soft); color: var(--err); }
+.badge.warn { background: var(--warn-soft); color: var(--warn); }
+.error-card { border-left: 4px solid var(--err); background: var(--err-soft); }
+.error-card h2 { color: var(--err); }
+.error-card pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.card-head h2 { margin: 0; }
+pre.code { margin: 0; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow: auto;
+  font: 13px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre; }
+pre.code code { background: none; padding: 0; }
+.hljs-keyword, .hljs-built_in { color: var(--kw); font-weight: 600; }
+.hljs-string { color: var(--str); } .hljs-number, .hljs-literal { color: var(--num); }
+.hljs-comment { color: var(--cmt); font-style: italic; } .hljs-title, .hljs-type { color: var(--fn); }
+.table-wrap { max-height: 480px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--surface-2); text-align: left; font-weight: 600; z-index: 1; }
+tbody tr:hover td { background: var(--surface-2); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.null { color: var(--muted); font-style: italic; font-size: 12px; }
+.table-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; color: var(--muted); font-size: 12px; gap: 8px; flex-wrap: wrap; }
+details.trace > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+details.trace > summary::-webkit-details-marker { display: none; }
+details.trace > summary::before { content: "\25B8"; color: var(--muted); transition: transform .15s; }
+details.trace[open] > summary::before { transform: rotate(90deg); }
+details.trace > summary h2 { margin: 0; }
+.attempt { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-top: 12px; }
+.attempt.failed { border-left: 4px solid var(--err); } .attempt.succeeded { border-left: 4px solid var(--ok); }
+.attempt-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.attempt-head strong { font-size: 14px; }
+.attempt-head .lat { margin-left: auto; color: var(--muted); font-size: 12px; }
+.attempt .reason { color: var(--muted); font-size: 13px; margin: 0 0 8px; white-space: pre-wrap; }
+.attempt .err-msg { margin-top: 8px; background: var(--err-soft); color: var(--err); border-radius: 6px; padding: 8px 10px; font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+.err-type { font-weight: 700; margin-right: 6px; }
+.tbl { border-bottom: 1px solid var(--border); padding: 6px 0; }
+.tbl > summary { cursor: pointer; font-weight: 600; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.tbl .tdesc { color: var(--muted); font-size: 12px; margin: 4px 0 6px; }
+.col { padding: 4px 0 4px 10px; border-left: 2px solid var(--border); margin-left: 4px; }
+.col .cn { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.col .ct { color: var(--accent); font-size: 11px; margin-left: 6px; }
+.col .cd { color: var(--muted); font-size: 12px; }
+.hidden { display: none !important; }
+@media (max-width: 1100px) {
+  .layout.with-schema { grid-template-columns: 220px minmax(0, 1fr); }
+  .with-schema #schemaPanel { position: fixed; right: 0; top: 0; bottom: 0; width: min(340px, 90vw); max-height: none; z-index: 30; border-radius: 0; }
+}
+@media (max-width: 760px) {
+  .layout, .layout.with-schema { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; }
+  #historyPanel { position: static; order: 2; max-height: 260px; }
+  main { order: 1; }
+  header { padding: 10px 16px; }
+  header h1 { font-size: 15px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="logo">SQL</span>Text-to-SQL Analytics Agent</h1>
+  <button class="btn" id="schemaToggle" aria-expanded="false" aria-controls="schemaPanel">Schema explorer</button>
+</header>
+<div class="layout" id="layout">
+  <aside class="panel" id="historyPanel">
+    <h2>History</h2>
+    <div id="history"><p class="empty">No questions yet.</p></div>
+  </aside>
+  <main>
+    <section class="card">
+      <label for="question" class="hidden">Question</label>
+      <textarea id="question" placeholder="Ask a question about your data, e.g. Which product categories drove the most revenue last quarter?"></textarea>
+      <div class="ask-row">
+        <span class="hint"><kbd>Ctrl</kbd> / <kbd>&#8984;</kbd> + <kbd>Enter</kbd> to ask</span>
+        <button class="btn-primary btn" id="askBtn">Ask</button>
+      </div>
+      <div class="chips" id="examples"></div>
+    </section>
+    <section class="card loading hidden" id="loading" aria-live="polite">
+      <div class="spinner"></div>
+      <div><strong>Thinking...</strong> <span id="elapsed" class="hint"></span><br>
+        <span class="hint">Generating SQL, running it, and self-correcting if needed. This can take 5-20 seconds.</span></div>
+    </section>
+    <div id="results" style="display:flex;flex-direction:column;gap:16px"></div>
+  </main>
+  <aside class="panel" id="schemaPanel">
+    <div class="card-head"><h2>Schema explorer</h2><button class="btn btn-sm" id="schemaClose">Close</button></div>
+    <div id="schema"><p class="empty">Loading schema...</p></div>
+  </aside>
+</div>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const history = [];
+  let activeIdx = -1, busy = false, timer = null;
+
+  // Safe DOM builder: text is always set via textContent, never innerHTML.
+  function el(tag, attrs, ...children) {
+    const n = document.createElement(tag);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
+      if (k === "class") n.className = v;
+      else if (k === "text") n.textContent = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v === true ? "" : v);
+    }
+    for (const c of children.flat()) {
+      if (c == null || c === false) continue;
+      n.appendChild(typeof c === "string" || typeof c === "number" ? document.createTextNode(String(c)) : c);
+    }
+    return n;
+  }
+  const clear = (n) => { while (n.firstChild) n.removeChild(n.firstChild); };
+
+  const nf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+  const isNum = (v) => typeof v === "number" && isFinite(v);
+  const fmtMs = (ms) => ms == null ? "" : ms >= 1000 ? (ms / 1000).toFixed(1) + " s" : Math.round(ms) + " ms";
+  function fmtCell(v) {
+    if (v === null || v === undefined) return null;
+    if (isNum(v)) return nf.format(v);
+    if (typeof v === "boolean") return v ? "true" : "false";
+    if (typeof v === "object") return JSON.stringify(v);
+    return String(v);
+  }
+
+  function codeBlock(sql) {
+    const code = el("code", { class: "language-sql", text: sql || "" });
+    if (window.hljs) { try { window.hljs.highlightElement(code); } catch (e) { /* ignore */ } }
+    return el("pre", { class: "code" }, code);
+  }
+
+  function copyBtn(getText) {
+    const b = el("button", { class: "btn btn-sm", text: "Copy" });
+    b.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(getText());
+        b.textContent = "Copied!";
+      } catch (e) {
+        const ta = el("textarea", { style: "position:fixed;opacity:0" }); ta.value = getText();
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); b.textContent = "Copied!"; } catch (e2) { b.textContent = "Copy failed"; }
+        ta.remove();
+      }
+      setTimeout(() => { b.textContent = "Copy"; }, 1500);
+    });
+    return b;
+  }
+
+  function toCSV(columns, rows) {
+    const esc = (v) => {
+      if (v === null || v === undefined) return "";
+      let s = typeof v === "object" ? JSON.stringify(v) : String(v);
+      if (/^[=+\-@]/.test(s) && !isNum(v)) s = "'" + s; // guard against CSV formula injection
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    return [columns.map(esc).join(",")].concat(rows.map((r) => r.map(esc).join(","))).join("\r\n");
+  }
+  function downloadCSV(res) {
+    const blob = new Blob(["﻿" + toCSV(res.columns || [], res.rows || [])], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const slug = (res.question || "results").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "results";
+    const a = el("a", { href: url, download: slug + ".csv" });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function renderTable(res) {
+    const cols = res.columns || [], rows = res.rows || [];
+    // A column is numeric if every non-null value is a number.
+    const numeric = cols.map((_, i) => {
+      let seen = false;
+      for (const r of rows) { const v = r[i]; if (v == null) continue; if (!isNum(v)) return false; seen = true; }
+      return seen;
+    });
+    const thead = el("thead", null, el("tr", null, cols.map((c, i) => el("th", { class: numeric[i] ? "num" : null, text: c }))));
+    const tbody = el("tbody");
+    const frag = document.createDocumentFragment();
+    for (const r of rows) {
+      frag.appendChild(el("tr", null, cols.map((_, i) => {
+        const f = fmtCell(r[i]);
+        if (f === null) return el("td", { class: "null", text: "NULL" });
+        return el("td", { class: numeric[i] ? "num" : null, text: f, title: f.length > 60 ? f : null });
+      })));
+    }
+    tbody.appendChild(frag);
+    const count = res.row_count != null ? res.row_count : rows.length;
+    const info = el("span", null, nf.format(count) + " row" + (count === 1 ? "" : "s"));
+    const foot = el("div", { class: "table-foot" },
+      el("div", null, info, res.truncated ? el("span", { class: "badge warn", style: "margin-left:8px", text: "Truncated: row limit reached, showing first " + nf.format(rows.length) }) : null),
+      el("button", { class: "btn btn-sm", text: "Download CSV", onclick: () => downloadCSV(res), disabled: cols.length ? null : true }));
+    const body = rows.length
+      ? el("div", { class: "table-wrap" }, el("table", null, thead, tbody))
+      : el("p", { class: "empty", text: "The query returned no rows." });
+    return el("section", { class: "card" }, el("div", { class: "card-head" }, el("h2", { text: "Results" })), body, foot);
+  }
+
+  function renderTrace(res) {
+    const attempts = res.attempts || [];
+    if (!attempts.length) return null;
+    const n = attempts.length;
+    let badge;
+    if (res.success && n > 1) badge = el("span", { class: "badge ok", text: "Recovered after " + n + " attempts" });
+    else if (res.success) badge = el("span", { class: "badge ok", text: "Succeeded on first attempt" });
+    else badge = el("span", { class: "badge err", text: "Failed after " + n + " attempt" + (n === 1 ? "" : "s") });
+    const items = attempts.map((a, idx) => {
+      const failed = !!a.error;
+      return el("div", { class: "attempt " + (failed ? "failed" : "succeeded") },
+        el("div", { class: "attempt-head" },
+          el("strong", { text: "Attempt " + (a.attempt != null ? a.attempt : idx + 1) }),
+          el("span", { class: "badge " + (failed ? "err" : "ok"), text: failed ? "Failed" : "Succeeded" }),
+          el("span", { class: "lat", text: fmtMs(a.latency_ms) })),
+        a.reasoning ? el("p", { class: "reason", text: a.reasoning }) : null,
+        a.sql ? codeBlock(a.sql) : el("p", { class: "empty", text: "No SQL generated." }),
+        failed ? el("div", { class: "err-msg" }, a.error_type ? el("span", { class: "err-type", text: "[" + a.error_type + "]" }) : null, String(a.error)) : null);
+    });
+    return el("details", { class: "card trace", open: n > 1 || !res.success },
+      el("summary", null, el("h2", { text: "Self-correction trace" }), badge,
+        el("span", { class: "hint", text: n + " attempt" + (n === 1 ? "" : "s") })),
+      items);
+  }
+
+  function renderResult(res) {
+    const out = $("results"); clear(out);
+    if (!res) return;
+    const metaRow = el("div", { class: "meta-row" },
+      el("span", { class: "badge", text: "Total " + fmtMs(res.latency_ms) }),
+      (res.attempts || []).length > 1 ? el("span", { class: "badge warn", text: res.attempts.length + " attempts" }) : null);
+    if (res.success) {
+      out.appendChild(el("section", { class: "card summary" }, el("h2", { text: "Summary" }),
+        el("p", { text: res.summary || "Query executed successfully." }), metaRow));
+      if (res.sql) {
+        out.appendChild(el("section", { class: "card" },
+          el("div", { class: "card-head" }, el("h2", { text: "Generated SQL" }), copyBtn(() => res.sql)),
+          codeBlock(res.sql)));
+      }
+      out.appendChild(renderTable(res));
+    } else {
+      out.appendChild(el("section", { class: "card error-card" }, el("h2", { text: "Could not answer this question" }),
+        el("pre", { text: res.error || "Unknown error." }), metaRow));
+    }
+    const trace = renderTrace(res);
+    if (trace) out.appendChild(trace);
+  }
+
+  function renderHistory() {
+    const box = $("history"); clear(box);
+    if (!history.length) { box.appendChild(el("p", { class: "empty", text: "No questions yet." })); return; }
+    for (let i = history.length - 1; i >= 0; i--) {
+      const h = history[i];
+      box.appendChild(el("button", { class: "history-item" + (i === activeIdx ? " active" : ""), title: h.question,
+        onclick: () => { activeIdx = i; $("question").value = h.question; renderResult(h.result); renderHistory(); window.scrollTo({ top: 0, behavior: "smooth" }); } },
+        el("span", { class: "q" }, el("span", { class: "dot " + (h.result.success ? "ok" : "err") }), h.question),
+        el("span", { class: "meta", text: h.time + " · " + fmtMs(h.result.latency_ms) })));
+    }
+  }
+
+  function setBusy(on) {
+    busy = on;
+    $("askBtn").disabled = on;
+    $("askBtn").textContent = on ? "Working..." : "Ask";
+    $("loading").classList.toggle("hidden", !on);
+    clearInterval(timer);
+    if (on) {
+      const t0 = Date.now(); $("elapsed").textContent = "";
+      timer = setInterval(() => { $("elapsed").textContent = Math.floor((Date.now() - t0) / 1000) + "s"; }, 500);
+    }
+  }
+
+  async function ask(q) {
+    const question = (q != null ? q : $("question").value).trim();
+    if (!question || busy) return;
+    $("question").value = question;
+    clear($("results"));
+    setBusy(true);
+    let result;
+    try {
+      const resp = await fetch("/api/query", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) });
+      let data = null;
+      try { data = await resp.json(); } catch (e) { /* non-JSON */ }
+      if (!resp.ok && !(data && "success" in data)) {
+        const detail = data && data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : resp.statusText;
+        result = { question, success: false, error: "HTTP " + resp.status + ": " + detail, attempts: [] };
+      } else result = data;
+    } catch (e) {
+      result = { question, success: false, error: "Network error: " + e.message, attempts: [] };
+    }
+    setBusy(false);
+    result.question = result.question || question;
+    history.push({ question, result, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
+    activeIdx = history.length - 1;
+    renderHistory();
+    renderResult(result);
+  }
+
+  async function loadExamples() {
+    try {
+      const data = await (await fetch("/api/examples")).json();
+      const box = $("examples"); clear(box);
+      for (const ex of (data.examples || [])) {
+        box.appendChild(el("button", { class: "chip", text: ex, onclick: () => { $("question").value = ex; ask(ex); } }));
+      }
+    } catch (e) { /* examples are optional */ }
+  }
+
+  async function loadSchema() {
+    const box = $("schema");
+    try {
+      const data = await (await fetch("/api/schema")).json();
+      clear(box);
+      const tables = data.tables || [];
+      if (!tables.length) { box.appendChild(el("p", { class: "empty", text: "No tables found." })); return; }
+      for (const t of tables) {
+        box.appendChild(el("details", { class: "tbl" },
+          el("summary", null, t.name, el("span", { class: "hint", style: "font-weight:400;margin-left:6px", text: "(" + (t.columns || []).length + ")" })),
+          t.description ? el("div", { class: "tdesc", text: t.description }) : null,
+          (t.columns || []).map((c) => el("div", { class: "col" },
+            el("span", { class: "cn", text: c.name }), el("span", { class: "ct", text: c.type || "" }),
+            c.description ? el("div", { class: "cd", text: c.description }) : null))));
+      }
+    } catch (e) {
+      clear(box); box.appendChild(el("p", { class: "empty", text: "Failed to load schema: " + e.message }));
+    }
+  }
+
+  function toggleSchema(force) {
+    const layout = $("layout");
+    const on = force != null ? force : !layout.classList.contains("with-schema");
+    layout.classList.toggle("with-schema", on);
+    $("schemaToggle").setAttribute("aria-expanded", String(on));
+  }
+
+  $("askBtn").addEventListener("click", () => ask());
+  $("question").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ask(); }
+  });
+  $("schemaToggle").addEventListener("click", () => toggleSchema());
+  $("schemaClose").addEventListener("click", () => toggleSchema(false));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") toggleSchema(false); });
+
+  loadExamples();
+  loadSchema();
+  $("question").focus();
+})();
+</script>
+</body>
+</html>

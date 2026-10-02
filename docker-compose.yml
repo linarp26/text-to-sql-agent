@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: text2sql-db
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop_admin
+      POSTGRES_PASSWORD: shop_admin_dev_pw   # local-dev only
+    ports:
+      - "5433:5432"   # 5433 on the host to avoid clashing with any local Postgres
+    volumes:
+      - ./db/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./db/02_seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+      - ./db/03_readonly_role.sql:/docker-entrypoint-initdb.d/03_readonly_role.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop_admin -d shop"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
